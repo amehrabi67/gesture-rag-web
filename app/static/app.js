@@ -29,6 +29,32 @@ function log(id, value) {
   $(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
+function setStatus(id, message, tone = "info") {
+  const el = $(id);
+  el.textContent = message;
+  el.dataset.tone = tone;
+}
+
+async function withBusy(buttonId, statusId, busyText, fn) {
+  const button = $(buttonId);
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = busyText;
+  setStatus(statusId, busyText);
+  try {
+    const result = await fn();
+    return result;
+  } catch (err) {
+    console.error(err);
+    setStatus(statusId, err.message || String(err), "error");
+    alert(err.message || String(err));
+    throw err;
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
 async function init() {
   bindEvents();
   $("apiBaseUrl").value = state.apiBaseUrl;
@@ -74,15 +100,39 @@ function bindEvents() {
     });
   });
 
-  $("createProjectBtn").addEventListener("click", createProject);
-  $("saveApiUrlBtn").addEventListener("click", saveApiUrl);
-  $("startCameraBtn").addEventListener("click", startCamera);
-  $("recordTrainBtn").addEventListener("click", () => recordToInput("trainingFile", 5000));
-  $("recordTestBtn").addEventListener("click", () => recordToInput("testFile", 15000));
-  $("uploadTrainBtn").addEventListener("click", uploadTraining);
-  $("trainModelBtn").addEventListener("click", trainModel);
-  $("uploadTestBtn").addEventListener("click", uploadTest);
-  $("runRagBtn").addEventListener("click", runRag);
+  $("createProjectBtn").addEventListener("click", () =>
+    withBusy("createProjectBtn", "trainStatus", "Creating project...", createProject),
+  );
+  $("saveApiUrlBtn").addEventListener("click", () =>
+    withBusy("saveApiUrlBtn", "trainStatus", "Checking backend...", saveApiUrl),
+  );
+  $("startCameraBtn").addEventListener("click", () =>
+    withBusy("startCameraBtn", "trainStatus", "Starting camera...", startCamera),
+  );
+  $("recordTrainBtn").addEventListener("click", () =>
+    withBusy("recordTrainBtn", "trainStatus", "Recording training clip...", async () => {
+      await recordToInput("trainingFile", 5000, "trainStatus");
+      await uploadTraining();
+    }),
+  );
+  $("recordTestBtn").addEventListener("click", () =>
+    withBusy("recordTestBtn", "testStatus", "Recording test clip...", async () => {
+      await recordToInput("testFile", 15000, "testStatus");
+      await uploadTest();
+    }),
+  );
+  $("uploadTrainBtn").addEventListener("click", () =>
+    withBusy("uploadTrainBtn", "trainStatus", "Processing training clip...", uploadTraining),
+  );
+  $("trainModelBtn").addEventListener("click", () =>
+    withBusy("trainModelBtn", "trainStatus", "Training KNN model...", trainModel),
+  );
+  $("uploadTestBtn").addEventListener("click", () =>
+    withBusy("uploadTestBtn", "testStatus", "Running gesture inference...", uploadTest),
+  );
+  $("runRagBtn").addEventListener("click", () =>
+    withBusy("runRagBtn", "ragStatus", "Running RAG analysis...", runRag),
+  );
 }
 
 async function saveApiUrl() {
@@ -120,6 +170,7 @@ async function createProject() {
   $("projectBadge").textContent = `Project ${project.project_id}`;
   $("modelStatus").textContent = "Ready for training clips";
   renderTrainingLabels(project.selected_gestures);
+  setStatus("trainStatus", "Project ready. Record or upload clips for each selected gesture.", "success");
   log("trainingOutput", project);
 }
 
@@ -127,23 +178,32 @@ async function startCamera() {
   if (state.stream) return state.stream;
   state.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   $("preview").srcObject = state.stream;
+  setStatus("trainStatus", "Camera is on. Recording buttons will send clips for processing.", "success");
   return state.stream;
 }
 
-async function recordToInput(inputId, ms) {
+async function recordToInput(inputId, ms, statusId) {
   const stream = await startCamera();
   const chunks = [];
-  const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+  const options = MediaRecorder.isTypeSupported("video/webm") ? { mimeType: "video/webm" } : undefined;
+  const recorder = new MediaRecorder(stream, options);
   recorder.ondataavailable = (event) => chunks.push(event.data);
   recorder.start();
-  await new Promise((resolve) => setTimeout(resolve, ms));
+  const seconds = Math.ceil(ms / 1000);
+  for (let remaining = seconds; remaining > 0; remaining -= 1) {
+    setStatus(statusId, `Recording... ${remaining}s`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
   recorder.stop();
   await new Promise((resolve) => (recorder.onstop = resolve));
-  const blob = new Blob(chunks, { type: "video/webm" });
-  const file = new File([blob], `${inputId}_${Date.now()}.webm`, { type: "video/webm" });
+  const type = recorder.mimeType || "video/webm";
+  const blob = new Blob(chunks, { type });
+  const extension = type.includes("mp4") ? "mp4" : "webm";
+  const file = new File([blob], `${inputId}_${Date.now()}.${extension}`, { type });
   const dt = new DataTransfer();
   dt.items.add(file);
   $(inputId).files = dt.files;
+  setStatus(statusId, "Recording saved. Sending it to the backend...");
 }
 
 async function uploadTraining() {
@@ -160,6 +220,7 @@ async function uploadTraining() {
     method: "POST",
     body: fd,
   });
+  setStatus("trainStatus", `Added ${result.samples_added} samples for ${$("trainingLabel").value}.`, "success");
   log("trainingOutput", result);
 }
 
@@ -167,6 +228,7 @@ async function trainModel() {
   requireProject();
   const result = await api(`/api/projects/${state.project.project_id}/train`, { method: "POST" });
   $("modelStatus").textContent = `${result.n_samples} samples, k=${result.n_neighbors}`;
+  setStatus("trainStatus", "KNN model trained.", "success");
   log("trainingOutput", result);
 }
 
@@ -185,6 +247,7 @@ async function uploadTest() {
   });
   state.lastTest = result;
   renderSegments(result.segments);
+  setStatus("testStatus", `Gesture test complete. ${result.segments.length} segment(s) detected.`, "success");
   log("testOutput", result);
 }
 
@@ -235,6 +298,7 @@ async function runRag() {
     method: "POST",
     body: fd,
   });
+  setStatus("ragStatus", "RAG analysis complete.", "success");
   log("ragOutput", result);
 }
 

@@ -247,6 +247,21 @@ video {
   white-space: pre-wrap;
 }
 
+.status-line {
+  min-height: 24px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.status-line[data-tone="success"] {
+  color: var(--accent-2);
+}
+
+.status-line[data-tone="error"] {
+  color: #b42318;
+}
+
 table {
   width: 100%;
   margin-top: 16px;

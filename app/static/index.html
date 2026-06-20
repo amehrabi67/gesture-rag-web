@@ -62,11 +62,12 @@
             <div class="camera-box">
               <video id="preview" autoplay muted playsinline></video>
               <div class="camera-actions">
-                <button id="startCameraBtn">Start Camera</button>
+                <button id="startCameraBtn">Start Preview</button>
                 <button id="recordTrainBtn">Record 5s Training</button>
                 <button id="uploadTrainBtn" class="primary">Upload Training Clip</button>
               </div>
             </div>
+            <div id="trainStatus" class="status-line"></div>
             <button id="trainModelBtn" class="primary wide">Train KNN Model</button>
             <pre id="trainingOutput" class="output"></pre>
           </div>
@@ -81,6 +82,7 @@
               <button id="recordTestBtn">Record 15s Test</button>
               <button id="uploadTestBtn" class="primary">Run Gesture Test</button>
             </div>
+            <div id="testStatus" class="status-line"></div>
             <div id="segmentsTable"></div>
             <pre id="testOutput" class="output"></pre>
           </div>
@@ -130,6 +132,7 @@
               </label>
             </div>
             <button id="runRagBtn" class="primary wide">Run RAG Analysis</button>
+            <div id="ragStatus" class="status-line"></div>
             <pre id="ragOutput" class="output"></pre>
           </div>
         </section>
