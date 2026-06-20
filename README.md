@@ -37,6 +37,18 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+Local Whisper is optional. To use `local_whisper`, install the extra requirements:
+
+```bash
+pip install -r requirements-local-whisper.txt
+```
+
+Semantic embedding retrieval is optional. The app works without it and falls back to lexical retrieval. To enable it, install:
+
+```bash
+pip install -r requirements-semantic-rag.txt
+```
+
 ## Website Deployment
 
 The repository is set up for two deployment modes:
