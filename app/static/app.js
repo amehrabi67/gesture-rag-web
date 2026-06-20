@@ -5,10 +5,19 @@ const state = {
   lastTest: null,
   trained: false,
   knownLabels: [],
-  apiBaseUrl: localStorage.getItem("gestureRagApiBaseUrl") || "",
+  apiBaseUrl: initialApiBaseUrl(),
 };
 
 const $ = (id) => document.getElementById(id);
+
+function initialApiBaseUrl() {
+  const saved = localStorage.getItem("gestureRagApiBaseUrl") || "";
+  if (["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
+    localStorage.removeItem("gestureRagApiBaseUrl");
+    return "";
+  }
+  return saved;
+}
 
 async function api(path, options = {}) {
   const base = state.apiBaseUrl.replace(/\/$/, "");
@@ -22,7 +31,11 @@ async function api(path, options = {}) {
     data = { raw: text };
   }
   if (!res.ok) {
-    throw new Error(data.detail || res.statusText);
+    const detail = data.detail || data.raw || res.statusText;
+    if (res.status === 404) {
+      throw new Error(`Not found at ${url}. Check the Backend API field or reload the page.`);
+    }
+    throw new Error(detail);
   }
   return data;
 }
@@ -143,6 +156,16 @@ function bindEvents() {
   });
 
   $("gestureName").addEventListener("input", renderTrainingLabels);
+  $("trainingFile").addEventListener("change", () => {
+    if ($("trainingFile").files[0]) {
+      setStatus("trainStatus", "Training video selected. Click Upload Training Clip to process it.");
+    }
+  });
+  $("testFile").addEventListener("change", () => {
+    if ($("testFile").files[0]) {
+      setStatus("testStatus", "Test video selected. Click Run Gesture Test after training.");
+    }
+  });
   $("useTranscription").addEventListener("change", updateApiControls);
   $("useLlm").addEventListener("change", updateApiControls);
   $("saveApiUrlBtn").addEventListener("click", () =>
@@ -277,10 +300,24 @@ async function uploadTraining() {
   const fd = new FormData();
   fd.append("gesture_label", label);
   fd.append("file", file);
-  const result = await api(`/api/projects/${state.session.project_id}/training-video`, {
-    method: "POST",
-    body: fd,
-  });
+  let result;
+  try {
+    result = await api(`/api/projects/${state.session.project_id}/training-video`, {
+      method: "POST",
+      body: fd,
+    });
+  } catch (err) {
+    if (String(err.message || err).toLowerCase().includes("not found")) {
+      resetSession();
+      await ensureSession(label);
+      result = await api(`/api/projects/${state.session.project_id}/training-video`, {
+        method: "POST",
+        body: fd,
+      });
+    } else {
+      throw err;
+    }
+  }
   rememberGesture(result.gesture_label || label);
   state.session.selected_gestures = result.selected_gestures || state.knownLabels;
   setStatus("trainStatus", `Added ${result.samples_added} samples for ${result.gesture_label || label}.`, "success");
