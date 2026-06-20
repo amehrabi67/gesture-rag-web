@@ -31,24 +31,59 @@ def load_labels() -> list[str]:
     return [line.strip() for line in LABEL_CSV.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def gesture_id(label: str) -> int:
-    labels = load_labels()
-    if label not in labels:
-        raise ValueError(f"Unknown gesture label: {label}")
-    return labels.index(label)
-
-
 def project_dir(project_id: str) -> Path:
     return UPLOADS_DIR / "projects" / project_id
 
 
+def _clean_labels(labels: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for label in labels:
+        name = " ".join(str(label).strip().split())
+        key = name.lower()
+        if name and key not in seen:
+            cleaned.append(name)
+            seen.add(key)
+    return cleaned
+
+
+def _label_id_map(selected_gestures: list[str]) -> dict[str, int]:
+    base_labels = load_labels()
+    used_ids: set[int] = set()
+    mapping: dict[str, int] = {}
+    next_custom_id = 1000
+    for label in selected_gestures:
+        if label in base_labels:
+            gid = base_labels.index(label)
+        else:
+            while next_custom_id in used_ids:
+                next_custom_id += 1
+            gid = next_custom_id
+            next_custom_id += 1
+        mapping[label] = gid
+        used_ids.add(gid)
+    return mapping
+
+
+def _project_label_lookup(project: dict[str, Any]) -> dict[int, str]:
+    if "id_to_label" in project:
+        return {int(k): str(v) for k, v in project["id_to_label"].items()}
+    return {int(gid): label for gid, label in zip(project["selected_ids"], project["selected_gestures"])}
+
+
+def _project_gesture_id(project: dict[str, Any], label: str) -> int:
+    if "label_to_id" in project and label in project["label_to_id"]:
+        return int(project["label_to_id"][label])
+    if label in project.get("selected_gestures", []):
+        return int(project["selected_ids"][project["selected_gestures"].index(label)])
+    raise ValueError(f"{label} is not selected for this project.")
+
+
 def create_project(selected_gestures: list[str]) -> dict[str, Any]:
-    labels = load_labels()
-    if len(selected_gestures) < 4 or len(selected_gestures) > 10:
-        raise ValueError("Select 4 to 10 gestures.")
-    unknown = [g for g in selected_gestures if g not in labels]
-    if unknown:
-        raise ValueError(f"Unknown gestures: {', '.join(unknown)}")
+    selected_gestures = _clean_labels(selected_gestures)
+    if not selected_gestures:
+        raise ValueError("Add at least one gesture name.")
+    label_to_id = _label_id_map(selected_gestures)
 
     pid = uuid.uuid4().hex[:12]
     pdir = project_dir(pid)
@@ -58,7 +93,9 @@ def create_project(selected_gestures: list[str]) -> dict[str, Any]:
     metadata = {
         "project_id": pid,
         "selected_gestures": selected_gestures,
-        "selected_ids": [labels.index(g) for g in selected_gestures],
+        "selected_ids": [label_to_id[g] for g in selected_gestures],
+        "label_to_id": label_to_id,
+        "id_to_label": {str(v): k for k, v in label_to_id.items()},
         "training_counts": {g: 0 for g in selected_gestures},
     }
     (pdir / "project.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -155,7 +192,7 @@ def add_training_video(project_id: str, gesture_label: str, video_path: Path) ->
     if not samples:
         raise RuntimeError("No hand trajectory samples were extracted. Try brighter video and keep the hand visible.")
 
-    gid = gesture_id(gesture_label)
+    gid = _project_gesture_id(project, gesture_label)
     train_csv = pdir / "training_point_history.csv"
     with train_csv.open("a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -196,6 +233,7 @@ def train_project_model(project_id: str, include_base: bool = True) -> dict[str,
 
     project = read_project(project_id)
     allowed_ids = set(project["selected_ids"])
+    label_lookup = _project_label_lookup(project)
     pdir = project_dir(project_id)
     x_rows: list[list[float]] = []
     y_rows: list[int] = []
@@ -210,12 +248,9 @@ def train_project_model(project_id: str, include_base: bool = True) -> dict[str,
     y_rows.extend(y_project)
 
     label_counts = Counter(y_rows)
-    missing = [load_labels()[gid] for gid in allowed_ids if label_counts.get(gid, 0) == 0]
+    missing = [label_lookup.get(gid, str(gid)) for gid in allowed_ids if label_counts.get(gid, 0) == 0]
     if missing:
         raise RuntimeError("Need at least one extracted sample for: " + ", ".join(missing))
-    if len(set(y_rows)) < 2:
-        raise RuntimeError("KNN needs at least two gesture classes with samples.")
-
     k = min(7, max(1, int(math.sqrt(len(y_rows)))))
     clf = KNeighborsClassifier(n_neighbors=k, weights="distance")
     clf.fit(np.asarray(x_rows, np.float32), np.asarray(y_rows, np.int32))
@@ -226,7 +261,7 @@ def train_project_model(project_id: str, include_base: bool = True) -> dict[str,
     project["model_summary"] = {
         "n_samples": len(y_rows),
         "n_neighbors": k,
-        "label_counts": {load_labels()[gid]: int(label_counts[gid]) for gid in sorted(label_counts)},
+        "label_counts": {label_lookup.get(gid, str(gid)): int(label_counts[gid]) for gid in sorted(label_counts)},
         "included_base_csv": include_base,
     }
     write_project(project)
@@ -263,7 +298,7 @@ def infer_video(project_id: str, video_path: Path) -> dict[str, Any]:
     if not model_path.exists():
         raise RuntimeError("No trained KNN model found. Add training clips and train first.")
 
-    labels = load_labels()
+    label_lookup = _project_label_lookup(project)
     clf = joblib.load(model_path)
 
     pdir = project_dir(project_id)
@@ -311,7 +346,7 @@ def infer_video(project_id: str, video_path: Path) -> dict[str, Any]:
                     smooth_q.append(pred)
                     voted = Counter(smooth_q).most_common(1)[0][0]
                     frame_predictions.append(
-                        FramePrediction(frame_i, frame_i / fps, voted, labels[voted], conf)
+                        FramePrediction(frame_i, frame_i / fps, voted, label_lookup.get(voted, str(voted)), conf)
                     )
             frame_i += 1
     cap.release()

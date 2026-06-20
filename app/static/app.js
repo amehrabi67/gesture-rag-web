@@ -29,6 +29,13 @@ function log(id, value) {
   $(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
+function option(value) {
+  const opt = document.createElement("option");
+  opt.value = value;
+  opt.textContent = value;
+  return opt;
+}
+
 function setStatus(id, message, tone = "info") {
   const el = $(id);
   el.textContent = message;
@@ -61,8 +68,9 @@ async function init() {
   updateApiStatus();
   const data = await api("/api/gestures");
   state.gestures = data.gestures;
-  renderGestureGrid(data.defaults);
-  renderTrainingLabels(data.defaults);
+  renderGestureGrid([]);
+  renderTrainingLabels(selectedGestures());
+  updateApiControls();
 }
 
 function renderGestureGrid(defaults) {
@@ -77,17 +85,39 @@ function renderGestureGrid(defaults) {
     `;
     row.querySelector("input").addEventListener("change", () => {
       renderTrainingLabels(selectedGestures());
+      invalidateProject();
     });
     grid.appendChild(row);
   });
 }
 
 function selectedGestures() {
-  return [...document.querySelectorAll("#gestureGrid input:checked")].map((x) => x.value);
+  const builtIns = [...document.querySelectorAll("#gestureGrid input:checked")].map((x) => x.value);
+  const custom = $("customGestures")
+    .value.split(/[\n,]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  return [...builtIns, ...custom].filter((label) => {
+    const key = label.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function renderTrainingLabels(labels) {
-  $("trainingLabel").innerHTML = labels.map((g) => `<option value="${g}">${g}</option>`).join("");
+  const select = $("trainingLabel");
+  select.innerHTML = "";
+  labels.forEach((label) => select.appendChild(option(label)));
+}
+
+function invalidateProject() {
+  state.project = null;
+  state.lastTest = null;
+  $("projectBadge").textContent = "No project yet";
+  $("modelStatus").textContent = "Model not trained";
+  renderTrainingLabels(selectedGestures());
 }
 
 function bindEvents() {
@@ -103,6 +133,9 @@ function bindEvents() {
   $("createProjectBtn").addEventListener("click", () =>
     withBusy("createProjectBtn", "trainStatus", "Creating project...", createProject),
   );
+  $("customGestures").addEventListener("input", invalidateProject);
+  $("useTranscription").addEventListener("change", updateApiControls);
+  $("useLlm").addEventListener("change", updateApiControls);
   $("saveApiUrlBtn").addEventListener("click", () =>
     withBusy("saveApiUrlBtn", "trainStatus", "Checking backend...", saveApiUrl),
   );
@@ -145,8 +178,9 @@ async function saveApiUrl() {
   $("modelStatus").textContent = "Model not trained";
   const data = await api("/api/gestures");
   state.gestures = data.gestures;
-  renderGestureGrid(data.defaults);
-  renderTrainingLabels(data.defaults);
+  renderGestureGrid([]);
+  renderTrainingLabels(selectedGestures());
+  updateApiControls();
 }
 
 function updateApiStatus() {
@@ -157,9 +191,8 @@ function updateApiStatus() {
 
 async function createProject() {
   const selected = selectedGestures();
-  if (selected.length < 4 || selected.length > 10) {
-    alert("Select 4 to 10 gestures.");
-    return;
+  if (!selected.length) {
+    throw new Error("Select or type at least one gesture.");
   }
   const project = await api("/api/projects", {
     method: "POST",
@@ -172,6 +205,27 @@ async function createProject() {
   renderTrainingLabels(project.selected_gestures);
   setStatus("trainStatus", "Project ready. Record or upload clips for each selected gesture.", "success");
   log("trainingOutput", project);
+  return project;
+}
+
+async function ensureProject() {
+  if (state.project) return state.project;
+  setStatus("trainStatus", "Creating project from current gesture list...");
+  const project = await createProject();
+  if (!project) throw new Error("Create a project first.");
+  return project;
+}
+
+function updateApiControls() {
+  const useTx = $("useTranscription").checked;
+  const useLlm = $("useLlm").checked;
+  $("transcriptionProvider").disabled = !useTx;
+  $("transcriptionModel").disabled = !useTx;
+  $("transcriptionKey").disabled = !useTx;
+  $("llmProvider").disabled = !useLlm;
+  $("llmModel").disabled = !useLlm;
+  $("llmKey").disabled = !useLlm;
+  $("llmBaseUrl").disabled = !useLlm;
 }
 
 async function startCamera() {
@@ -207,11 +261,10 @@ async function recordToInput(inputId, ms, statusId) {
 }
 
 async function uploadTraining() {
-  requireProject();
+  await ensureProject();
   const file = $("trainingFile").files[0];
   if (!file) {
-    alert("Choose or record a training video.");
-    return;
+    throw new Error("Choose or record a training video.");
   }
   const fd = new FormData();
   fd.append("gesture_label", $("trainingLabel").value);
@@ -225,19 +278,19 @@ async function uploadTraining() {
 }
 
 async function trainModel() {
-  requireProject();
+  await ensureProject();
   const result = await api(`/api/projects/${state.project.project_id}/train`, { method: "POST" });
+  state.project.model_summary = result;
   $("modelStatus").textContent = `${result.n_samples} samples, k=${result.n_neighbors}`;
   setStatus("trainStatus", "KNN model trained.", "success");
   log("trainingOutput", result);
 }
 
 async function uploadTest() {
-  requireProject();
+  requireModel();
   const file = $("testFile").files[0];
   if (!file) {
-    alert("Choose or record a test video.");
-    return;
+    throw new Error("Choose or record a test video.");
   }
   const fd = new FormData();
   fd.append("file", file);
@@ -279,20 +332,19 @@ function renderSegments(segments) {
 async function runRag() {
   requireProject();
   if (!state.lastTest) {
-    alert("Run a gesture test first.");
-    return;
+    throw new Error("Run a gesture test first.");
   }
   const fd = new FormData();
   fd.append("query", $("ragQuery").value);
   fd.append("video_file", state.lastTest.video_file);
   fd.append("segments_json", JSON.stringify(state.lastTest.segments));
-  fd.append("transcription_provider", $("transcriptionProvider").value);
+  fd.append("transcription_provider", $("useTranscription").checked ? $("transcriptionProvider").value : "none");
   fd.append("transcription_model", $("transcriptionModel").value);
-  fd.append("transcription_api_key", $("transcriptionKey").value);
-  fd.append("llm_provider", $("llmProvider").value);
+  fd.append("transcription_api_key", $("useTranscription").checked ? $("transcriptionKey").value : "");
+  fd.append("llm_provider", $("useLlm").checked ? $("llmProvider").value : "none");
   fd.append("llm_model", $("llmModel").value);
-  fd.append("llm_api_key", $("llmKey").value);
-  fd.append("llm_base_url", $("llmBaseUrl").value);
+  fd.append("llm_api_key", $("useLlm").checked ? $("llmKey").value : "");
+  fd.append("llm_base_url", $("useLlm").checked ? $("llmBaseUrl").value : "");
 
   const result = await api(`/api/projects/${state.project.project_id}/analyze`, {
     method: "POST",
@@ -305,6 +357,13 @@ async function runRag() {
 function requireProject() {
   if (!state.project) {
     throw new Error("Create a project first.");
+  }
+}
+
+function requireModel() {
+  requireProject();
+  if (!state.project.model_path && !state.project.model_summary) {
+    throw new Error("Train the KNN model before testing a gesture video.");
   }
 }
 

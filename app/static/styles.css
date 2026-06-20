@@ -154,6 +154,17 @@ h2 {
   margin: 16px 0;
 }
 
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.check-row input {
+  width: auto;
+}
+
 .gesture-pill {
   display: flex;
   gap: 8px;

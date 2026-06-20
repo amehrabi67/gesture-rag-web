@@ -34,8 +34,12 @@
 
       <section class="workspace">
         <aside class="panel">
-          <h2>1. Select Gestures</h2>
-          <p class="muted">Choose 4 to 10 labels.</p>
+          <h2>1. Name Gestures</h2>
+          <p class="muted">Select any labels or type your own.</p>
+          <label>
+            Custom gesture names
+            <textarea id="customGestures" placeholder="One per line, or comma-separated"></textarea>
+          </label>
           <div id="gestureGrid" class="gesture-grid"></div>
           <button id="createProjectBtn" class="primary">Create Project</button>
         </aside>
@@ -95,6 +99,10 @@
                 <textarea id="ragQuery">How do the gestures align with the spoken explanation?</textarea>
               </label>
               <label>
+                <span class="check-row">
+                  <input id="useTranscription" type="checkbox" />
+                  <span>Transcribe speech</span>
+                </span>
                 Transcription provider
                 <select id="transcriptionProvider">
                   <option value="none">none</option>
@@ -111,6 +119,10 @@
                 <input id="transcriptionKey" type="password" placeholder="Only for this request" />
               </label>
               <label>
+                <span class="check-row">
+                  <input id="useLlm" type="checkbox" />
+                  <span>Use LLM API</span>
+                </span>
                 LLM provider
                 <select id="llmProvider">
                   <option value="none">rule-based only</option>
