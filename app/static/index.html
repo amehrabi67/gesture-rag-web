@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gesture RAG Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">MediaPipe + KNN + Whisper/RAG</p>
+          <h1>Gesture RAG Studio</h1>
+          <p class="lead">
+            Select a gesture vocabulary, record training clips, test a new explanation video,
+            then align gestures with speech for evidence-based interpretation.
+          </p>
+        </div>
+        <div class="status-card">
+          <span id="projectBadge">No project yet</span>
+          <strong id="modelStatus">Model not trained</strong>
+          <label class="api-config">
+            Backend API
+            <span class="api-row">
+              <input id="apiBaseUrl" placeholder="Same origin or deployed backend URL" />
+              <button id="saveApiUrlBtn" type="button">Save</button>
+            </span>
+          </label>
+          <small id="apiStatus">Using same-origin API.</small>
+          <small>API keys are used only for the current request.</small>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel">
+          <h2>1. Select Gestures</h2>
+          <p class="muted">Choose 4 to 10 labels.</p>
+          <div id="gestureGrid" class="gesture-grid"></div>
+          <button id="createProjectBtn" class="primary">Create Project</button>
+        </aside>
+
+        <section class="panel main-panel">
+          <div class="tabs">
+            <button class="tab active" data-tab="train">Train</button>
+            <button class="tab" data-tab="test">Test</button>
+            <button class="tab" data-tab="rag">RAG</button>
+          </div>
+
+          <div id="train" class="tab-page active">
+            <h2>2. Record Training Clips</h2>
+            <div class="record-grid">
+              <label>
+                Gesture label
+                <select id="trainingLabel"></select>
+              </label>
+              <label>
+                Upload clip
+                <input id="trainingFile" type="file" accept="video/*" />
+              </label>
+            </div>
+            <div class="camera-box">
+              <video id="preview" autoplay muted playsinline></video>
+              <div class="camera-actions">
+                <button id="startCameraBtn">Start Camera</button>
+                <button id="recordTrainBtn">Record 5s Training</button>
+                <button id="uploadTrainBtn" class="primary">Upload Training Clip</button>
+              </div>
+            </div>
+            <button id="trainModelBtn" class="primary wide">Train KNN Model</button>
+            <pre id="trainingOutput" class="output"></pre>
+          </div>
+
+          <div id="test" class="tab-page">
+            <h2>3. Test a New Video</h2>
+            <label>
+              Upload or record test video
+              <input id="testFile" type="file" accept="video/*" />
+            </label>
+            <div class="camera-actions">
+              <button id="recordTestBtn">Record 15s Test</button>
+              <button id="uploadTestBtn" class="primary">Run Gesture Test</button>
+            </div>
+            <div id="segmentsTable"></div>
+            <pre id="testOutput" class="output"></pre>
+          </div>
+
+          <div id="rag" class="tab-page">
+            <h2>4. Speech + Gesture RAG</h2>
+            <div class="settings-grid">
+              <label>
+                RAG question
+                <textarea id="ragQuery">How do the gestures align with the spoken explanation?</textarea>
+              </label>
+              <label>
+                Transcription provider
+                <select id="transcriptionProvider">
+                  <option value="none">none</option>
+                  <option value="openai">OpenAI API</option>
+                  <option value="local_whisper">Local Whisper</option>
+                </select>
+              </label>
+              <label>
+                Transcription model
+                <input id="transcriptionModel" value="whisper-1" />
+              </label>
+              <label>
+                Transcription API key
+                <input id="transcriptionKey" type="password" placeholder="Only for this request" />
+              </label>
+              <label>
+                LLM provider
+                <select id="llmProvider">
+                  <option value="none">rule-based only</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="openai_compatible">OpenAI-compatible</option>
+                </select>
+              </label>
+              <label>
+                LLM model
+                <input id="llmModel" value="gpt-4.1-mini" />
+              </label>
+              <label>
+                LLM API key
+                <input id="llmKey" type="password" placeholder="Only for this request" />
+              </label>
+              <label>
+                Base URL
+                <input id="llmBaseUrl" placeholder="Optional, e.g. OpenRouter/Groq/Together/local" />
+              </label>
+            </div>
+            <button id="runRagBtn" class="primary wide">Run RAG Analysis</button>
+            <pre id="ragOutput" class="output"></pre>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

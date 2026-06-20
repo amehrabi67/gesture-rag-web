@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: gesture-rag-web
+    env: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /api/gestures
