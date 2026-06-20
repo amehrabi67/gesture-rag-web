@@ -154,6 +154,10 @@ h2 {
   margin: 16px 0;
 }
 
+.gesture-grid.compact {
+  align-content: start;
+}
+
 .check-row {
   display: flex;
   align-items: center;
@@ -172,6 +176,11 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.65rem;
+  background: #fbfcff;
+}
+
+.gesture-chip {
+  text-align: left;
   background: #fbfcff;
 }
 

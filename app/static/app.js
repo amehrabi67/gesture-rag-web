@@ -1,8 +1,10 @@
 const state = {
   gestures: [],
-  project: null,
+  session: null,
   stream: null,
   lastTest: null,
+  trained: false,
+  knownLabels: [],
   apiBaseUrl: localStorage.getItem("gestureRagApiBaseUrl") || "",
 };
 
@@ -68,56 +70,66 @@ async function init() {
   updateApiStatus();
   const data = await api("/api/gestures");
   state.gestures = data.gestures;
-  renderGestureGrid([]);
-  renderTrainingLabels(selectedGestures());
+  renderGestureSuggestions();
+  renderKnownLabels();
+  renderTrainingLabels();
   updateApiControls();
 }
 
-function renderGestureGrid(defaults) {
+function renderGestureSuggestions() {
+  const list = $("gestureSuggestions");
+  list.innerHTML = "";
+  state.gestures.forEach((gesture) => list.appendChild(option(gesture)));
+}
+
+function currentGestureName() {
+  return $("gestureName").value.trim();
+}
+
+function rememberGesture(label) {
+  if (!label) return;
+  if (!state.knownLabels.some((x) => x.toLowerCase() === label.toLowerCase())) {
+    state.knownLabels.push(label);
+  }
+  renderKnownLabels();
+  renderTrainingLabels();
+}
+
+function renderKnownLabels() {
   const grid = $("gestureGrid");
-  grid.innerHTML = "";
-  state.gestures.forEach((gesture) => {
-    const row = document.createElement("label");
-    row.className = "gesture-pill";
-    row.innerHTML = `
-      <input type="checkbox" value="${gesture}" ${defaults.includes(gesture) ? "checked" : ""}>
-      <span>${gesture}</span>
-    `;
-    row.querySelector("input").addEventListener("change", () => {
-      renderTrainingLabels(selectedGestures());
-      invalidateProject();
+  if (!state.knownLabels.length) {
+    grid.innerHTML = "<p class='muted'>No examples added yet.</p>";
+    return;
+  }
+  grid.innerHTML = state.knownLabels
+    .map((label) => `<button class="gesture-chip" type="button" data-label="${escapeHtml(label)}">${escapeHtml(label)}</button>`)
+    .join("");
+  grid.querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("gestureName").value = button.dataset.label;
+      renderTrainingLabels();
     });
-    grid.appendChild(row);
   });
 }
 
-function selectedGestures() {
-  const builtIns = [...document.querySelectorAll("#gestureGrid input:checked")].map((x) => x.value);
-  const custom = $("customGestures")
-    .value.split(/[\n,]+/)
-    .map((x) => x.trim())
-    .filter(Boolean);
-  const seen = new Set();
-  return [...builtIns, ...custom].filter((label) => {
-    const key = label.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function renderTrainingLabels(labels) {
+function renderTrainingLabels() {
   const select = $("trainingLabel");
   select.innerHTML = "";
-  labels.forEach((label) => select.appendChild(option(label)));
+  const label = currentGestureName();
+  const labels = label ? [label, ...state.knownLabels.filter((x) => x.toLowerCase() !== label.toLowerCase())] : state.knownLabels;
+  labels.forEach((item) => select.appendChild(option(item)));
 }
 
-function invalidateProject() {
-  state.project = null;
+function escapeHtml(value) {
+  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
+}
+
+function resetSession() {
+  state.session = null;
   state.lastTest = null;
-  $("projectBadge").textContent = "No project yet";
+  state.trained = false;
+  $("projectBadge").textContent = "Ready";
   $("modelStatus").textContent = "Model not trained";
-  renderTrainingLabels(selectedGestures());
 }
 
 function bindEvents() {
@@ -130,10 +142,7 @@ function bindEvents() {
     });
   });
 
-  $("createProjectBtn").addEventListener("click", () =>
-    withBusy("createProjectBtn", "trainStatus", "Creating project...", createProject),
-  );
-  $("customGestures").addEventListener("input", invalidateProject);
+  $("gestureName").addEventListener("input", renderTrainingLabels);
   $("useTranscription").addEventListener("change", updateApiControls);
   $("useLlm").addEventListener("change", updateApiControls);
   $("saveApiUrlBtn").addEventListener("click", () =>
@@ -172,14 +181,15 @@ async function saveApiUrl() {
   state.apiBaseUrl = $("apiBaseUrl").value.trim().replace(/\/$/, "");
   localStorage.setItem("gestureRagApiBaseUrl", state.apiBaseUrl);
   updateApiStatus();
-  state.project = null;
+  state.session = null;
   state.lastTest = null;
-  $("projectBadge").textContent = "No project yet";
+  state.trained = false;
+  $("projectBadge").textContent = "Ready";
   $("modelStatus").textContent = "Model not trained";
   const data = await api("/api/gestures");
   state.gestures = data.gestures;
-  renderGestureGrid([]);
-  renderTrainingLabels(selectedGestures());
+  renderGestureSuggestions();
+  renderTrainingLabels();
   updateApiControls();
 }
 
@@ -189,31 +199,21 @@ function updateApiStatus() {
     : "Using same-origin API.";
 }
 
-async function createProject() {
-  const selected = selectedGestures();
-  if (!selected.length) {
-    throw new Error("Select or type at least one gesture.");
-  }
-  const project = await api("/api/projects", {
+async function createSession(firstLabel) {
+  const session = await api("/api/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selected_gestures: selected }),
+    body: JSON.stringify({ selected_gestures: [firstLabel] }),
   });
-  state.project = project;
-  $("projectBadge").textContent = `Project ${project.project_id}`;
-  $("modelStatus").textContent = "Ready for training clips";
-  renderTrainingLabels(project.selected_gestures);
-  setStatus("trainStatus", "Project ready. Record or upload clips for each selected gesture.", "success");
-  log("trainingOutput", project);
-  return project;
+  state.session = session;
+  $("projectBadge").textContent = "Examples in progress";
+  setStatus("trainStatus", "Ready. Add examples, then train.", "success");
+  return session;
 }
 
-async function ensureProject() {
-  if (state.project) return state.project;
-  setStatus("trainStatus", "Creating project from current gesture list...");
-  const project = await createProject();
-  if (!project) throw new Error("Create a project first.");
-  return project;
+async function ensureSession(label) {
+  if (state.session) return state.session;
+  return createSession(label);
 }
 
 function updateApiControls() {
@@ -230,7 +230,11 @@ function updateApiControls() {
 
 async function startCamera() {
   if (state.stream) return state.stream;
-  state.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  try {
+    state.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch (err) {
+    throw new Error("Camera access is blocked. Use the video upload field, or reset camera permission in the browser address bar and reload.");
+  }
   $("preview").srcObject = state.stream;
   setStatus("trainStatus", "Camera is on. Recording buttons will send clips for processing.", "success");
   return state.stream;
@@ -261,26 +265,32 @@ async function recordToInput(inputId, ms, statusId) {
 }
 
 async function uploadTraining() {
-  await ensureProject();
+  const label = $("trainingLabel").value || currentGestureName();
+  if (!label) {
+    throw new Error("Type a gesture name first.");
+  }
+  await ensureSession(label);
   const file = $("trainingFile").files[0];
   if (!file) {
     throw new Error("Choose or record a training video.");
   }
   const fd = new FormData();
-  fd.append("gesture_label", $("trainingLabel").value);
+  fd.append("gesture_label", label);
   fd.append("file", file);
-  const result = await api(`/api/projects/${state.project.project_id}/training-video`, {
+  const result = await api(`/api/projects/${state.session.project_id}/training-video`, {
     method: "POST",
     body: fd,
   });
-  setStatus("trainStatus", `Added ${result.samples_added} samples for ${$("trainingLabel").value}.`, "success");
+  rememberGesture(result.gesture_label || label);
+  state.session.selected_gestures = result.selected_gestures || state.knownLabels;
+  setStatus("trainStatus", `Added ${result.samples_added} samples for ${result.gesture_label || label}.`, "success");
   log("trainingOutput", result);
 }
 
 async function trainModel() {
-  await ensureProject();
-  const result = await api(`/api/projects/${state.project.project_id}/train`, { method: "POST" });
-  state.project.model_summary = result;
+  requireSession();
+  const result = await api(`/api/projects/${state.session.project_id}/train`, { method: "POST" });
+  state.trained = true;
   $("modelStatus").textContent = `${result.n_samples} samples, k=${result.n_neighbors}`;
   setStatus("trainStatus", "KNN model trained.", "success");
   log("trainingOutput", result);
@@ -294,7 +304,7 @@ async function uploadTest() {
   }
   const fd = new FormData();
   fd.append("file", file);
-  const result = await api(`/api/projects/${state.project.project_id}/test-video`, {
+  const result = await api(`/api/projects/${state.session.project_id}/test-video`, {
     method: "POST",
     body: fd,
   });
@@ -330,7 +340,7 @@ function renderSegments(segments) {
 }
 
 async function runRag() {
-  requireProject();
+  requireSession();
   if (!state.lastTest) {
     throw new Error("Run a gesture test first.");
   }
@@ -346,7 +356,7 @@ async function runRag() {
   fd.append("llm_api_key", $("useLlm").checked ? $("llmKey").value : "");
   fd.append("llm_base_url", $("useLlm").checked ? $("llmBaseUrl").value : "");
 
-  const result = await api(`/api/projects/${state.project.project_id}/analyze`, {
+  const result = await api(`/api/projects/${state.session.project_id}/analyze`, {
     method: "POST",
     body: fd,
   });
@@ -354,16 +364,16 @@ async function runRag() {
   log("ragOutput", result);
 }
 
-function requireProject() {
-  if (!state.project) {
-    throw new Error("Create a project first.");
+function requireSession() {
+  if (!state.session) {
+    throw new Error("Add at least one training example first.");
   }
 }
 
 function requireModel() {
-  requireProject();
-  if (!state.project.model_path && !state.project.model_summary) {
-    throw new Error("Train the KNN model before testing a gesture video.");
+  requireSession();
+  if (!state.trained) {
+    throw new Error("Train the model before testing a gesture video.");
   }
 }
 

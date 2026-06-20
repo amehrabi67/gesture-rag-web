@@ -13,12 +13,11 @@
           <p class="eyebrow">MediaPipe + KNN + Whisper/RAG</p>
           <h1>Gesture RAG Studio</h1>
           <p class="lead">
-            Select a gesture vocabulary, record training clips, test a new explanation video,
-            then align gestures with speech for evidence-based interpretation.
+            Name a gesture, record examples, train, then test a new video. API features stay off unless you enable them.
           </p>
         </div>
         <div class="status-card">
-          <span id="projectBadge">No project yet</span>
+          <span id="projectBadge">Ready</span>
           <strong id="modelStatus">Model not trained</strong>
           <label class="api-config">
             Backend API
@@ -34,14 +33,14 @@
 
       <section class="workspace">
         <aside class="panel">
-          <h2>1. Name Gestures</h2>
-          <p class="muted">Select any labels or type your own.</p>
+          <h2>Gestures</h2>
+          <p class="muted">Type any name. Use the same name for repeated examples.</p>
           <label>
-            Custom gesture names
-            <textarea id="customGestures" placeholder="One per line, or comma-separated"></textarea>
+            Gesture name
+            <input id="gestureName" list="gestureSuggestions" placeholder="Example: pinch zoom, circle, my gesture" />
+            <datalist id="gestureSuggestions"></datalist>
           </label>
-          <div id="gestureGrid" class="gesture-grid"></div>
-          <button id="createProjectBtn" class="primary">Create Project</button>
+          <div id="gestureGrid" class="gesture-grid compact"></div>
         </aside>
 
         <section class="panel main-panel">
@@ -52,7 +51,7 @@
           </div>
 
           <div id="train" class="tab-page active">
-            <h2>2. Record Training Clips</h2>
+            <h2>Train Gestures</h2>
             <div class="record-grid">
               <label>
                 Gesture label
@@ -77,7 +76,7 @@
           </div>
 
           <div id="test" class="tab-page">
-            <h2>3. Test a New Video</h2>
+            <h2>Test Video</h2>
             <label>
               Upload or record test video
               <input id="testFile" type="file" accept="video/*" />
@@ -92,7 +91,7 @@
           </div>
 
           <div id="rag" class="tab-page">
-            <h2>4. Speech + Gesture RAG</h2>
+            <h2>Optional Analysis</h2>
             <div class="settings-grid">
               <label>
                 RAG question

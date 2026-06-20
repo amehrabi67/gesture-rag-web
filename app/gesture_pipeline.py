@@ -79,6 +79,28 @@ def _project_gesture_id(project: dict[str, Any], label: str) -> int:
     raise ValueError(f"{label} is not selected for this project.")
 
 
+def _ensure_project_gesture(project: dict[str, Any], label: str) -> int:
+    label = _clean_labels([label])[0] if _clean_labels([label]) else ""
+    if not label:
+        raise ValueError("Gesture name is required.")
+    if label in project.get("selected_gestures", []):
+        return _project_gesture_id(project, label)
+
+    used_ids = {int(gid) for gid in project.get("selected_ids", [])}
+    base_labels = load_labels()
+    if label in base_labels and base_labels.index(label) not in used_ids:
+        gid = base_labels.index(label)
+    else:
+        gid = max([999, *used_ids]) + 1
+
+    project.setdefault("selected_gestures", []).append(label)
+    project.setdefault("selected_ids", []).append(gid)
+    project.setdefault("label_to_id", {})[label] = gid
+    project.setdefault("id_to_label", {})[str(gid)] = label
+    project.setdefault("training_counts", {})[label] = 0
+    return gid
+
+
 def create_project(selected_gestures: list[str]) -> dict[str, Any]:
     selected_gestures = _clean_labels(selected_gestures)
     if not selected_gestures:
@@ -180,8 +202,8 @@ def extract_samples_from_video(video_path: Path) -> list[np.ndarray]:
 
 def add_training_video(project_id: str, gesture_label: str, video_path: Path) -> dict[str, Any]:
     project = read_project(project_id)
-    if gesture_label not in project["selected_gestures"]:
-        raise ValueError(f"{gesture_label} is not selected for this project.")
+    gid = _ensure_project_gesture(project, gesture_label)
+    gesture_label = _project_label_lookup(project)[gid]
 
     pdir = project_dir(project_id)
     safe_name = f"{uuid.uuid4().hex}_{video_path.name}"
@@ -192,7 +214,6 @@ def add_training_video(project_id: str, gesture_label: str, video_path: Path) ->
     if not samples:
         raise RuntimeError("No hand trajectory samples were extracted. Try brighter video and keep the hand visible.")
 
-    gid = _project_gesture_id(project, gesture_label)
     train_csv = pdir / "training_point_history.csv"
     with train_csv.open("a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -202,7 +223,13 @@ def add_training_video(project_id: str, gesture_label: str, video_path: Path) ->
     counts = project.setdefault("training_counts", {g: 0 for g in project["selected_gestures"]})
     counts[gesture_label] = counts.get(gesture_label, 0) + len(samples)
     write_project(project)
-    return {"saved_video": stored_video.name, "samples_added": len(samples), "training_counts": counts}
+    return {
+        "saved_video": stored_video.name,
+        "samples_added": len(samples),
+        "gesture_label": gesture_label,
+        "selected_gestures": project["selected_gestures"],
+        "training_counts": counts,
+    }
 
 
 def _load_point_history_rows(path: Path, allowed_ids: set[int]) -> tuple[list[list[float]], list[int]]:
