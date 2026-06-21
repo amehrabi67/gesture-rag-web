@@ -13,7 +13,7 @@
           <p class="eyebrow">MediaPipe + KNN + Whisper/RAG</p>
           <h1>Gesture RAG Studio</h1>
           <p class="lead">
-            Name gestures, add examples, train, then test a video. Motions that do not look close enough to training examples are ignored as unknown.
+            Name at least two gestures, add examples, train, then test a video. Motions that do not look close enough to training examples are ignored as unknown.
           </p>
         </div>
         <div class="status-card">
@@ -72,7 +72,7 @@
             </div>
             <div id="trainStatus" class="status-line"></div>
             <button id="trainModelBtn" class="primary wide">Train KNN Model</button>
-            <p class="muted">For best accuracy, add multiple examples for each gesture. One gesture works, but similar-looking unrelated hand motion may still be harder to reject.</p>
+            <p class="muted">Add examples for at least two different gesture names before training. More examples per gesture improves accuracy.</p>
             <pre id="trainingOutput" class="output"></pre>
           </div>
 

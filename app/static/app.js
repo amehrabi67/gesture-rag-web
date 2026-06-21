@@ -326,6 +326,9 @@ async function uploadTraining() {
 
 async function trainModel() {
   requireSession();
+  if (state.knownLabels.length < 2) {
+    throw new Error("Add training examples for at least two different gesture names before training.");
+  }
   const result = await api(`/api/projects/${state.session.project_id}/train`, { method: "POST" });
   state.trained = true;
   $("modelStatus").textContent = `${result.n_samples} samples, k=${result.n_neighbors}`;

@@ -282,6 +282,8 @@ def train_project_model(project_id: str, include_base: bool = True) -> dict[str,
     missing = [label_lookup.get(gid, str(gid)) for gid in allowed_ids if label_counts.get(gid, 0) == 0]
     if missing:
         raise RuntimeError("Need at least one extracted sample for: " + ", ".join(missing))
+    if len(label_counts) < 2:
+        raise RuntimeError("Train at least two different gestures before running the model.")
     k = min(7, max(1, int(math.sqrt(len(y_rows)))))
     x_arr = np.asarray(x_rows, np.float32)
     y_arr = np.asarray(y_rows, np.int32)
