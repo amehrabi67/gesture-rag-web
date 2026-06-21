@@ -25,6 +25,10 @@ SMOOTH_WIN = 9
 MIN_SEG_SEC = 0.35
 MERGE_GAP_SEC = 0.20
 MAX_FRAME_WIDTH = 640
+UNKNOWN_LABEL_ID = -1
+UNKNOWN_LABEL = "Unknown"
+MIN_DISTANCE_THRESHOLD = 0.25
+THRESHOLD_MULTIPLIER = 2.5
 
 
 def load_labels() -> list[str]:
@@ -279,8 +283,11 @@ def train_project_model(project_id: str, include_base: bool = True) -> dict[str,
     if missing:
         raise RuntimeError("Need at least one extracted sample for: " + ", ".join(missing))
     k = min(7, max(1, int(math.sqrt(len(y_rows)))))
+    x_arr = np.asarray(x_rows, np.float32)
+    y_arr = np.asarray(y_rows, np.int32)
     clf = KNeighborsClassifier(n_neighbors=k, weights="distance")
-    clf.fit(np.asarray(x_rows, np.float32), np.asarray(y_rows, np.int32))
+    clf.fit(x_arr, y_arr)
+    distance_threshold = _estimate_distance_threshold(x_arr)
     model_path = pdir / "point_history_knn.pkl"
     joblib.dump(clf, model_path)
 
@@ -288,6 +295,7 @@ def train_project_model(project_id: str, include_base: bool = True) -> dict[str,
     project["model_summary"] = {
         "n_samples": len(y_rows),
         "n_neighbors": k,
+        "distance_threshold": distance_threshold,
         "label_counts": {label_lookup.get(gid, str(gid)): int(label_counts[gid]) for gid in sorted(label_counts)},
         "included_base_csv": include_base,
     }
@@ -302,15 +310,38 @@ class FramePrediction:
     label_id: int
     label: str
     confidence: float | None
+    distance: float | None
 
 
-def _predict_confidence(clf: Any, vec: np.ndarray) -> tuple[int, float | None]:
+def _estimate_distance_threshold(x_arr: np.ndarray) -> float:
+    if len(x_arr) < 2:
+        return MIN_DISTANCE_THRESHOLD
+    diffs = x_arr[:, None, :] - x_arr[None, :, :]
+    distances = np.linalg.norm(diffs, axis=2)
+    np.fill_diagonal(distances, np.inf)
+    nearest = np.min(distances, axis=1)
+    finite = nearest[np.isfinite(nearest)]
+    if not len(finite):
+        return MIN_DISTANCE_THRESHOLD
+    threshold = float(np.percentile(finite, 95) * THRESHOLD_MULTIPLIER)
+    return round(max(MIN_DISTANCE_THRESHOLD, threshold), 4)
+
+
+def _predict_confidence(clf: Any, vec: np.ndarray, distance_threshold: float | None) -> tuple[int, float | None, float | None]:
+    distance: float | None = None
+    if distance_threshold is not None and hasattr(clf, "kneighbors"):
+        distances, _ = clf.kneighbors([vec], n_neighbors=1)
+        distance = float(distances[0][0])
+        if distance > distance_threshold:
+            confidence = round(1.0 / (1.0 + distance), 4)
+            return UNKNOWN_LABEL_ID, confidence, round(distance, 4)
+
     pred = int(clf.predict([vec])[0])
     conf: float | None = None
     if hasattr(clf, "predict_proba"):
         probs = clf.predict_proba([vec])[0]
         conf = float(np.max(probs))
-    return pred, conf
+    return pred, conf, round(distance, 4) if distance is not None else None
 
 
 def infer_video(project_id: str, video_path: Path) -> dict[str, Any]:
@@ -326,6 +357,8 @@ def infer_video(project_id: str, video_path: Path) -> dict[str, Any]:
         raise RuntimeError("No trained KNN model found. Add training clips and train first.")
 
     label_lookup = _project_label_lookup(project)
+    model_summary = project.get("model_summary") or {}
+    distance_threshold = model_summary.get("distance_threshold")
     clf = joblib.load(model_path)
 
     pdir = project_dir(project_id)
@@ -369,11 +402,12 @@ def infer_video(project_id: str, video_path: Path) -> dict[str, Any]:
                 lm = res.multi_hand_landmarks[0].landmark[8]
                 history.append((lm.x * w, lm.y * h))
                 if len(history) == HISTORY_LENGTH and frame_i % PRED_EVERY_N_FRAMES == 0:
-                    pred, conf = _predict_confidence(clf, normalize_seq(history))
+                    pred, conf, distance = _predict_confidence(clf, normalize_seq(history), distance_threshold)
                     smooth_q.append(pred)
                     voted = Counter(smooth_q).most_common(1)[0][0]
+                    label = UNKNOWN_LABEL if voted == UNKNOWN_LABEL_ID else label_lookup.get(voted, str(voted))
                     frame_predictions.append(
-                        FramePrediction(frame_i, frame_i / fps, voted, label_lookup.get(voted, str(voted)), conf)
+                        FramePrediction(frame_i, frame_i / fps, voted, label, conf, distance)
                     )
             frame_i += 1
     cap.release()
@@ -387,6 +421,10 @@ def infer_video(project_id: str, video_path: Path) -> dict[str, Any]:
         "height": height,
         "frames_seen": frame_i,
         "segments": segments,
+        "unknown_rejection": {
+            "enabled": distance_threshold is not None,
+            "distance_threshold": distance_threshold,
+        },
     }
     out_path = pdir / "outputs" / f"{Path(safe_name).stem}_gesture_segments.json"
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -423,6 +461,8 @@ def _predictions_to_segments(preds: list[FramePrediction], fps: float) -> list[d
 
     kept = []
     for seg in raw:
+        if seg["label_id"] == UNKNOWN_LABEL_ID:
+            continue
         start = seg["start_frame"] / fps
         end = seg["end_frame"] / fps
         dur = max(0.0, end - start)

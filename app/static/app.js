@@ -329,7 +329,7 @@ async function trainModel() {
   const result = await api(`/api/projects/${state.session.project_id}/train`, { method: "POST" });
   state.trained = true;
   $("modelStatus").textContent = `${result.n_samples} samples, k=${result.n_neighbors}`;
-  setStatus("trainStatus", "KNN model trained.", "success");
+  setStatus("trainStatus", "Model trained with unknown-motion rejection.", "success");
   log("trainingOutput", result);
 }
 
@@ -347,7 +347,11 @@ async function uploadTest() {
   });
   state.lastTest = result;
   renderSegments(result.segments);
-  setStatus("testStatus", `Gesture test complete. ${result.segments.length} segment(s) detected.`, "success");
+  setStatus(
+    "testStatus",
+    `Gesture test complete. ${result.segments.length} matching segment(s) detected; non-matching motion was ignored.`,
+    "success",
+  );
   log("testOutput", result);
 }
 
